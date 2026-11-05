@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toko Mikro</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">Toko Mikro<small>dashboard toko</small></div>
+    <nav id="nav">
+      <button data-v="produk" class="on">Produk</button>
+      <button data-v="keranjang">Keranjang <span id="jmlKeranjang"></span></button>
+      <button data-v="pesanan">Pesanan saya</button>
+      <button data-v="akun">Akun</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="svc" id="svc"></div>
+    <a href="admin.html" class="muted">Admin</a>
+  </div>
+</header>
+
+<main>
+  <!-- PRODUK -->
+  <section id="v-produk">
+    <div class="row" style="margin-bottom:14px">
+      <input id="cari" placeholder="Cari produk..." style="max-width:280px">
+      <select id="filterKat" style="max-width:220px"><option value="0">Semua kategori</option></select>
+    </div>
+    <div class="grid" id="daftarProduk"></div>
+  </section>
+
+  <!-- KERANJANG -->
+  <section id="v-keranjang" class="hidden">
+    <h2>Keranjang</h2>
+    <div class="panel" id="isiKeranjang"></div>
+    <div class="panel">
+      <h3>Checkout</h3>
+      <label>Kirim ke alamat</label>
+      <select id="pilihAlamat"></select>
+      <p class="muted">Belum ada alamat? Tambahkan di menu Akun.</p>
+      <button class="btn primary" id="btnCheckout">Checkout</button>
+    </div>
+  </section>
+
+  <!-- PESANAN -->
+  <section id="v-pesanan" class="hidden">
+    <h2>Pesanan saya</h2>
+    <div id="daftarPesanan"></div>
+  </section>
+
+  <!-- AKUN -->
+  <section id="v-akun" class="hidden">
+    <div id="belumLogin" class="two">
+      <div class="panel">
+        <h3>Masuk</h3>
+        <label>Email</label><input id="loginEmail" type="email">
+        <label>Password</label><input id="loginPass" type="password">
+        <button class="btn primary mt" id="btnLogin">Masuk</button>
+      </div>
+      <div class="panel">
+        <h3>Daftar akun baru</h3>
+        <label>Nama</label><input id="regNama">
+        <label>Email</label><input id="regEmail" type="email">
+        <label>Telepon</label><input id="regTelp">
+        <label>Password (min. 6 karakter)</label><input id="regPass" type="password">
+        <button class="btn primary mt" id="btnDaftar">Daftar</button>
+      </div>
+    </div>
+    <div id="sudahLogin" class="hidden">
+      <div class="two">
+        <div class="panel">
+          <h3>Profil</h3>
+          <label>Nama</label><input id="profNama">
+          <label>Telepon</label><input id="profTelp">
+          <p class="muted" id="profEmail"></p>
+          <div class="row"><button class="btn primary" id="btnSimpanProfil">Simpan</button><button class="btn" id="btnKeluar">Keluar</button></div>
+        </div>
+        <div class="panel">
+          <h3>Tambah alamat</h3>
+          <div class="two" style="gap:8px">
+            <div><label>Label</label><input id="alLabel" placeholder="Rumah"></div>
+            <div><label>Penerima</label><input id="alPenerima"></div>
+          </div>
+          <label>Alamat</label><input id="alAlamat">
+          <div class="two" style="gap:8px">
+            <div><label>Kota</label><input id="alKota"></div>
+            <div><label>Kode pos</label><input id="alKodePos"></div>
+          </div>
+          <label>Telepon</label><input id="alTelp">
+          <button class="btn primary mt" id="btnTambahAlamat">Tambah alamat</button>
+        </div>
+      </div>
+      <div class="panel"><h3>Alamat saya</h3><div id="daftarAlamat"></div></div>
+    </div>
+  </section>
+</main>
+
+<script src="common.js"></script>
+<script>
+let produk = [];
+
+// ---------- Navigasi ----------
+function tampil(v) {
+  document.querySelectorAll('main > section').forEach((s) => s.classList.toggle('hidden', s.id !== 'v-' + v));
+  document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  if (v !== 'produk' && v !== 'akun' && !Auth.token) { toast('Silakan masuk dulu', 'err'); return tampil('akun'); }
+  ({ produk: muatProduk, keranjang: muatKeranjang, pesanan: muatPesanan, akun: muatAkun })[v]();
+}
+document.querySelectorAll('#nav button').forEach((b) => b.onclick = () => tampil(b.dataset.v));
+
+// ---------- Produk (katalog-service) ----------
+async function muatKategori() {
+  const kat = await api('GET', '/katalog/kategori').catch(() => []);
+  $('#filterKat').innerHTML = '<option value="0">Semua kategori</option>' + kat.map((k) => `<option value="${k.id}">${esc(k.nama)}</option>`).join('');
+}
+async function muatProduk() {
+  const q = encodeURIComponent($('#cari').value);
+  try {
+    produk = await api('GET', `/katalog/produk?kategori_id=${$('#filterKat').value}&q=${q}`);
+  } catch (e) {
+    $('#daftarProduk').innerHTML = `<div class="empty">Katalog tidak tersedia: ${esc(e.message)}</div>`; return;
+  }
+  $('#daftarProduk').innerHTML = produk.length ? produk.map((p) => `
+    <div class="card">
+      <div class="img">${p.gambar_url ? `<img src="${esc(p.gambar_url)}" alt="">` : esc(p.nama[0])}</div>
+      <div class="body">
+        <span class="muted">${esc(p.kategori_nama || 'Tanpa kategori')}</span>
+        <strong>${esc(p.nama)}</strong>
+        <span class="muted">${esc(p.deskripsi)}</span>
+        <div class="spacer"></div>
+        <div class="row" style="justify-content:space-between">
+          <span class="harga">${rupiah(p.harga)}</span><span class="muted">stok ${p.stok}</span>
+        </div>
+        <button class="btn primary" ${p.stok < 1 ? 'disabled' : ''} onclick="tambah(${p.id})">${p.stok < 1 ? 'Habis' : '+ Keranjang'}</button>
+      </div>
+    </div>`).join('') : '<div class="empty">Produk tidak ditemukan</div>';
+}
+let tunda;
+$('#cari').oninput = () => { clearTimeout(tunda); tunda = setTimeout(muatProduk, 300); };
+$('#filterKat').onchange = muatProduk;
+
+function tambah(id) {
+  if (!Auth.token) { toast('Silakan masuk dulu', 'err'); return tampil('akun'); }
+  aksi(async () => { const k = await api('POST', '/order/keranjang', { produk_id: id, qty: 1 }); hitungKeranjang(k); toast('Ditambahkan ke keranjang'); });
+}
+
+// ---------- Keranjang & checkout (order-service) ----------
+function hitungKeranjang(k) {
+  const n = (k?.items || []).reduce((a, i) => a + i.qty, 0);
+  $('#jmlKeranjang').textContent = n ? `(${n})` : '';
+}
+async function muatKeranjang() {
+  const k = await api('GET', '/order/keranjang').catch((e) => { toast(e.message, 'err'); return { items: [], total: 0 }; });
+  hitungKeranjang(k);
+  $('#isiKeranjang').innerHTML = k.items.length ? `<div class="scroll"><table>
+    <tr><th>Produk</th><th class="num">Harga</th><th>Jumlah</th><th class="num">Subtotal</th><th></th></tr>
+    ${k.items.map((i) => `<tr>
+      <td>${esc(i.nama || '#' + i.produk_id)}<div class="muted">${esc(i.catatan || 'stok ' + i.stok)}</div></td>
+      <td class="num">${rupiah(i.harga)}</td>
+      <td><input type="number" min="1" value="${i.qty}" style="width:72px" onchange="ubahQty(${i.produk_id}, this.value)"></td>
+      <td class="num">${rupiah(i.subtotal)}</td>
+      <td><button class="btn danger" onclick="hapusItem(${i.produk_id})">Hapus</button></td></tr>`).join('')}
+    <tr><th colspan="3">Total</th><th class="num">${rupiah(k.total)}</th><th></th></tr></table></div>`
+    : '<div class="empty">Keranjang kosong</div>';
+  const alamat = await api('GET', '/pelanggan/alamat').catch(() => []);
+  $('#pilihAlamat').innerHTML = alamat.map((a) => `<option value="${a.id}">${esc(a.label)}: ${esc(a.penerima)}, ${esc(a.alamat)}, ${esc(a.kota)}</option>`).join('');
+  $('#btnCheckout').disabled = !k.items.length || !alamat.length;
+}
+function ubahQty(id, qty) { aksi(async () => { await api('PUT', `/order/keranjang/${id}`, { qty: Number(qty) }); muatKeranjang(); }); }
+function hapusItem(id) { aksi(async () => { await api('DELETE', `/order/keranjang/${id}`); muatKeranjang(); }); }
+$('#btnCheckout').onclick = () => aksi(async () => {
+  $('#btnCheckout').disabled = true;
+  try {
+    const p = await api('POST', '/order/checkout', { alamat_id: Number($('#pilihAlamat').value) });
+    toast(`Pesanan ${p.kode} dibuat. Silakan bayar.`);
+    hitungKeranjang(null);
+    tampil('pesanan');
+  } finally { $('#btnCheckout').disabled = false; }
+});
+
+// ---------- Pesanan & pembayaran ----------
+async function muatPesanan() {
+  const list = await api('GET', '/order/pesanan').catch((e) => { toast(e.message, 'err'); return []; });
+  if (!list.length) { $('#daftarPesanan').innerHTML = '<div class="panel empty">Belum ada pesanan</div>'; return; }
+  const detail = await Promise.all(list.map((p) => api('GET', `/order/pesanan/${p.kode}`).catch(() => p)));
+  $('#daftarPesanan').innerHTML = detail.map((p) => `
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <div><strong>${esc(p.kode)}</strong> ${badge(p.status)}<div class="muted">${tgl(p.created_at)} · ${esc(p.alamat_kirim)}</div></div>
+        <strong>${rupiah(p.total)}</strong>
+      </div>
+      ${p.keterangan ? `<p class="muted">${esc(p.keterangan)}</p>` : ''}
+      <div class="muted">${(p.items || []).map((i) => `${esc(i.nama)} × ${i.qty}`).join(', ')}</div>
+      ${p.status === 'MENUNGGU_PEMBAYARAN' ? `
+        <div class="row mt">
+          <select id="metode-${p.pembayaran_id}" style="max-width:160px"><option>transfer</option><option>ewallet</option><option>kartu</option></select>
+          <button class="btn primary" onclick="bayar(${p.pembayaran_id}, 'sukses')">Bayar (simulasi sukses)</button>
+          <button class="btn" onclick="bayar(${p.pembayaran_id}, 'gagal')">Simulasi gagal</button>
+          <button class="btn danger" onclick="batal('${p.kode}')">Batalkan</button>
+        </div>` : ''}
+      <details class="mt"><summary class="muted">Riwayat status</summary>
+        <ul class="timeline">${(p.riwayat || []).map((r) => `<li>${badge(r.status)} ${tgl(r.created_at)} <span class="muted">${esc(r.catatan)}</span></li>`).join('')}</ul>
+      </details>
+    </div>`).join('');
+}
+function bayar(id, simulasi) {
+  aksi(async () => {
+    const b = await api('POST', `/pembayaran/${id}/bayar`, { metode: $('#metode-' + id).value, simulasi });
+    toast(b.status === 'BERHASIL' ? 'Pembayaran berhasil' : 'Pembayaran gagal, pesanan dibatalkan', b.status === 'BERHASIL' ? 'ok' : 'err');
+    if (!b.tersinkron) toast('Status belum tersinkron ke order-service, akan dicoba ulang otomatis', 'err');
+    muatPesanan();
+  });
+}
+function batal(kode) { aksi(async () => { await api('POST', `/order/pesanan/${kode}/batal`); toast('Pesanan dibatalkan'); muatPesanan(); }); }
+
+// ---------- Akun (pelanggan-service) ----------
+async function muatAkun() {
+  const login = !!Auth.token;
+  $('#belumLogin').classList.toggle('hidden', login);
+  $('#sudahLogin').classList.toggle('hidden', !login);
+  if (!login) return;
+  try {
+    const p = await api('GET', '/pelanggan/profil');
+    $('#profNama').value = p.nama; $('#profTelp').value = p.telepon; $('#profEmail').textContent = p.email + ' · ' + p.role;
+  } catch (e) { if (e.status === 401) { Auth.keluar(); return muatAkun(); } }
+  const alamat = await api('GET', '/pelanggan/alamat').catch(() => []);
+  $('#daftarAlamat').innerHTML = alamat.length ? `<table>${alamat.map((a) => `<tr>
+    <td><strong>${esc(a.label)}</strong><div class="muted">${esc(a.penerima)} · ${esc(a.telepon)}</div></td>
+    <td>${esc(a.alamat)}, ${esc(a.kota)} ${esc(a.kode_pos)}</td>
+    <td><button class="btn danger" onclick="hapusAlamat(${a.id})">Hapus</button></td></tr>`).join('')}</table>` : '<div class="empty">Belum ada alamat</div>';
+}
+$('#btnLogin').onclick = () => aksi(async () => {
+  const r = await api('POST', '/pelanggan/login', { email: $('#loginEmail').value, password: $('#loginPass').value });
+  Auth.simpan(r.token, r.pelanggan); toast('Halo, ' + r.pelanggan.nama); tampil('produk');
+});
+$('#btnDaftar').onclick = () => aksi(async () => {
+  const body = { nama: $('#regNama').value, email: $('#regEmail').value, telepon: $('#regTelp').value, password: $('#regPass').value };
+  await api('POST', '/pelanggan/register', body);
+  const r = await api('POST', '/pelanggan/login', { email: body.email, password: body.password });
+  Auth.simpan(r.token, r.pelanggan); toast('Akun dibuat'); muatAkun();
+});
+$('#btnSimpanProfil').onclick = () => aksi(async () => { await api('PUT', '/pelanggan/profil', { nama: $('#profNama').value, telepon: $('#profTelp').value }); toast('Profil disimpan'); });
+$('#btnKeluar').onclick = () => { Auth.keluar(); hitungKeranjang(null); muatAkun(); };
+$('#btnTambahAlamat').onclick = () => aksi(async () => {
+  await api('POST', '/pelanggan/alamat', { label: $('#alLabel').value, penerima: $('#alPenerima').value, alamat: $('#alAlamat').value, kota: $('#alKota').value, kode_pos: $('#alKodePos').value, telepon: $('#alTelp').value });
+  ['#alLabel', '#alPenerima', '#alAlamat', '#alKota', '#alKodePos', '#alTelp'].forEach((s) => $(s).value = '');
+  toast('Alamat ditambahkan'); muatAkun();
+});
+function hapusAlamat(id) { aksi(async () => { await api('DELETE', `/pelanggan/alamat/${id}`); muatAkun(); }); }
+
+// ---------- Mulai ----------
+muatKategori().then(muatProduk);
+if (Auth.token) api('GET', '/order/keranjang').then(hitungKeranjang).catch(() => {});
+cekLayanan($('#svc')); setInterval(() => cekLayanan($('#svc')), 10000);
+</script>
+</body>
+</html>

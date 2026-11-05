@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin Toko Mikro</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">Toko Mikro<small>dashboard admin</small></div>
+    <nav id="nav" class="hidden">
+      <button data-v="laporan" class="on">Laporan</button>
+      <button data-v="pesanan">Pesanan</button>
+      <button data-v="produk">Produk</button>
+      <button data-v="pembayaran">Pembayaran</button>
+      <button data-v="pelanggan">Pelanggan</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="svc" id="svc"></div>
+    <a href="index.html" class="muted">Toko</a>
+    <button class="btn hidden" id="btnKeluar">Keluar</button>
+  </div>
+</header>
+
+<main>
+  <section id="v-login" class="panel" style="max-width:380px;margin:40px auto">
+    <h3>Masuk sebagai admin</h3>
+    <label>Email</label><input id="email" type="email" value="admin@toko.local">
+    <label>Password</label><input id="pass" type="password">
+    <button class="btn primary mt" id="btnLogin">Masuk</button>
+  </section>
+
+  <section id="v-laporan" class="hidden">
+    <h2>Laporan pembayaran</h2>
+    <div class="stats" id="stats"></div>
+    <div class="two">
+      <div class="panel"><h3>Per status</h3><div id="perStatus"></div></div>
+      <div class="panel"><h3>Pendapatan per hari (30 hari)</h3><div id="perHari"></div></div>
+    </div>
+  </section>
+
+  <section id="v-pesanan" class="hidden">
+    <div class="row" style="justify-content:space-between"><h2>Semua pesanan</h2>
+      <select id="filterStatus" style="max-width:220px">
+        <option value="">Semua status</option><option>MENUNGGU_PEMBAYARAN</option><option>DIBAYAR</option><option>DIKIRIM</option><option>SELESAI</option><option>DIBATALKAN</option><option>GAGAL</option>
+      </select></div>
+    <div class="panel scroll" id="tabelPesanan"></div>
+  </section>
+
+  <section id="v-produk" class="hidden">
+    <h2>Produk &amp; kategori</h2>
+    <div class="two">
+      <div class="panel">
+        <h3 id="judulForm">Tambah produk</h3>
+        <input type="hidden" id="pId">
+        <label>Nama</label><input id="pNama">
+        <label>Kategori</label><select id="pKat"></select>
+        <div class="two" style="gap:8px">
+          <div><label>Harga (Rp)</label><input id="pHarga" type="number" min="0"></div>
+          <div><label>Stok</label><input id="pStok" type="number" min="0"></div>
+        </div>
+        <label>Deskripsi</label><input id="pDesk">
+        <label>URL gambar (opsional)</label><input id="pGambar">
+        <div class="row mt"><button class="btn primary" id="btnSimpanProduk">Simpan</button><button class="btn" id="btnResetProduk">Batal</button></div>
+      </div>
+      <div class="panel">
+        <h3>Kategori</h3>
+        <div class="row"><input id="kNama" placeholder="Nama kategori baru"><button class="btn primary" id="btnTambahKat">Tambah</button></div>
+        <div id="daftarKat" class="mt"></div>
+      </div>
+    </div>
+    <div class="panel scroll" id="tabelProduk"></div>
+    <div class="panel scroll"><h3>Reservasi stok terbaru</h3><div id="tabelReservasi"></div></div>
+  </section>
+
+  <section id="v-pembayaran" class="hidden">
+    <div class="row" style="justify-content:space-between"><h2>Pembayaran</h2><button class="btn" id="btnSinkron">Sinkronkan sekarang</button></div>
+    <div class="panel scroll" id="tabelBayar"></div>
+  </section>
+
+  <section id="v-pelanggan" class="hidden">
+    <h2>Pelanggan</h2>
+    <div class="panel scroll" id="tabelPelanggan"></div>
+  </section>
+</main>
+
+<script src="common.js"></script>
+<script>
+let kategori = [];
+
+function tampil(v) {
+  document.querySelectorAll('main > section').forEach((s) => s.classList.toggle('hidden', s.id !== 'v-' + v));
+  document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  const f = { laporan: muatLaporan, pesanan: muatPesanan, produk: muatProduk, pembayaran: muatBayar, pelanggan: muatPelanggan }[v];
+  if (f) aksi(f);
+}
+document.querySelectorAll('#nav button').forEach((b) => b.onclick = () => tampil(b.dataset.v));
+
+function mulai() {
+  const admin = Auth.user && Auth.user.role === 'admin';
+  $('#nav').classList.toggle('hidden', !admin);
+  $('#btnKeluar').classList.toggle('hidden', !admin);
+  tampil(admin ? 'laporan' : 'login');
+}
+$('#btnLogin').onclick = () => aksi(async () => {
+  const r = await api('POST', '/pelanggan/login', { email: $('#email').value, password: $('#pass').value });
+  if (r.pelanggan.role !== 'admin') throw new Error('Akun ini bukan admin');
+  Auth.simpan(r.token, r.pelanggan); mulai();
+});
+$('#btnKeluar').onclick = () => { Auth.keluar(); mulai(); };
+
+// ---------- Laporan ----------
+async function muatLaporan() {
+  const [lap, pesanan, produk] = await Promise.all([
+    api('GET', '/pembayaran/admin/laporan'),
+    api('GET', '/order/admin/pesanan').catch(() => []),
+    api('GET', '/katalog/produk').catch(() => []),
+  ]);
+  const stokTipis = produk.filter((p) => p.stok < 5).length;
+  $('#stats').innerHTML = [
+    ['Total pendapatan', rupiah(lap.total_pendapatan)],
+    ['Jumlah pesanan', pesanan.length],
+    ['Menunggu dikirim', pesanan.filter((p) => p.status === 'DIBAYAR').length],
+    ['Produk stok < 5', stokTipis],
+    ['Belum tersinkron', lap.belum_tersinkron],
+  ].map(([k, v]) => `<div class="stat"><span class="muted">${k}</span><b>${v}</b></div>`).join('');
+  $('#perStatus').innerHTML = lap.per_status.length ? `<table><tr><th>Status</th><th class="num">Transaksi</th><th class="num">Nominal</th></tr>
+    ${lap.per_status.map((s) => `<tr><td>${badge(s.status)}</td><td class="num">${s.jumlah_transaksi}</td><td class="num">${rupiah(s.total_nominal)}</td></tr>`).join('')}</table>` : '<div class="empty">Belum ada data</div>';
+  const max = Math.max(1, ...lap.per_hari.map((h) => h.pendapatan));
+  $('#perHari').innerHTML = lap.per_hari.length ? lap.per_hari.map((h) => `
+    <div class="row" style="flex-wrap:nowrap;margin-bottom:6px"><span class="muted" style="width:90px">${h.tanggal}</span>
+    <div style="flex:1;background:var(--accent-soft);border-radius:4px"><div style="width:${(h.pendapatan / max) * 100}%;background:var(--accent);height:14px;border-radius:4px"></div></div>
+    <span class="num" style="width:120px">${rupiah(h.pendapatan)}</span></div>`).join('') : '<div class="empty">Belum ada pembayaran berhasil</div>';
+}
+
+// ---------- Pesanan ----------
+async function muatPesanan() {
+  const list = await api('GET', '/order/admin/pesanan?status=' + $('#filterStatus').value);
+  $('#tabelPesanan').innerHTML = list.length ? `<table><tr><th>Kode</th><th>Pelanggan</th><th>Waktu</th><th class="num">Total</th><th>Status</th><th>Aksi</th></tr>
+    ${list.map((p) => `<tr><td><strong>${esc(p.kode)}</strong><div class="muted">${esc(p.keterangan)}</div></td>
+      <td>${esc(p.pelanggan_nama)}<div class="muted">${esc(p.alamat_kirim)}</div></td>
+      <td>${tgl(p.created_at)}</td><td class="num">${rupiah(p.total)}</td><td>${badge(p.status)}</td>
+      <td>${p.status === 'DIBAYAR' ? `<button class="btn primary" onclick="ubahStatus('${p.kode}','DIKIRIM')">Kirim</button>` : ''}
+          ${p.status === 'DIKIRIM' ? `<button class="btn primary" onclick="ubahStatus('${p.kode}','SELESAI')">Selesai</button>` : ''}</td></tr>`).join('')}</table>`
+    : '<div class="empty">Tidak ada pesanan</div>';
+}
+$('#filterStatus').onchange = () => aksi(muatPesanan);
+function ubahStatus(kode, status) { aksi(async () => { await api('PUT', `/order/admin/pesanan/${kode}/status`, { status }); toast(`${kode} → ${status}`); muatPesanan(); }); }
+
+// ---------- Produk & kategori ----------
+async function muatProduk() {
+  [kategori] = await Promise.all([api('GET', '/katalog/kategori')]);
+  $('#pKat').innerHTML = '<option value="">(tanpa kategori)</option>' + kategori.map((k) => `<option value="${k.id}">${esc(k.nama)}</option>`).join('');
+  $('#daftarKat').innerHTML = kategori.map((k) => `<div class="row" style="justify-content:space-between;padding:4px 0">${esc(k.nama)}<button class="btn danger" onclick="hapusKat(${k.id})">Hapus</button></div>`).join('');
+  const produk = await api('GET', '/katalog/produk');
+  window._produk = produk;
+  $('#tabelProduk').innerHTML = `<table><tr><th>ID</th><th>Nama</th><th>Kategori</th><th class="num">Harga</th><th class="num">Stok</th><th>Aksi</th></tr>
+    ${produk.map((p) => `<tr><td>${p.id}</td><td>${esc(p.nama)}</td><td>${esc(p.kategori_nama || '-')}</td><td class="num">${rupiah(p.harga)}</td>
+      <td class="num">${p.stok}</td><td class="row"><button class="btn" onclick="editProduk(${p.id})">Edit</button>
+      <button class="btn" onclick="tambahStok(${p.id})">+10 stok</button><button class="btn danger" onclick="hapusProduk(${p.id})">Hapus</button></td></tr>`).join('')}</table>`;
+  const res = await api('GET', '/katalog/admin/reservasi').catch(() => []);
+  $('#tabelReservasi').innerHTML = res.length ? `<table><tr><th>Order</th><th>Produk</th><th class="num">Qty</th><th>Status</th><th>Waktu</th></tr>
+    ${res.map((r) => `<tr><td>${esc(r.order_kode)}</td><td>${esc(r.produk)}</td><td class="num">${r.qty}</td><td>${badge(r.status)}</td><td>${tgl(r.created_at)}</td></tr>`).join('')}</table>` : '<div class="empty">Belum ada reservasi</div>';
+}
+function resetForm() { ['#pId', '#pNama', '#pHarga', '#pStok', '#pDesk', '#pGambar'].forEach((s) => $(s).value = ''); $('#pKat').value = ''; $('#judulForm').textContent = 'Tambah produk'; }
+function editProduk(id) {
+  const p = window._produk.find((x) => x.id === id);
+  $('#pId').value = p.id; $('#pNama').value = p.nama; $('#pKat').value = p.kategori_id || ''; $('#pHarga').value = p.harga;
+  $('#pStok').value = p.stok; $('#pDesk').value = p.deskripsi; $('#pGambar').value = p.gambar_url; $('#judulForm').textContent = 'Edit produk #' + id;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+$('#btnResetProduk').onclick = resetForm;
+$('#btnSimpanProduk').onclick = () => aksi(async () => {
+  const body = { nama: $('#pNama').value, kategori_id: $('#pKat').value ? Number($('#pKat').value) : null, harga: Number($('#pHarga').value),
+    stok: Number($('#pStok').value), deskripsi: $('#pDesk').value, gambar_url: $('#pGambar').value };
+  const id = $('#pId').value;
+  await api(id ? 'PUT' : 'POST', id ? `/katalog/produk/${id}` : '/katalog/produk', body);
+  toast('Produk disimpan'); resetForm(); muatProduk();
+});
+function hapusProduk(id) { aksi(async () => { await api('DELETE', `/katalog/produk/${id}`); toast('Produk dihapus'); muatProduk(); }); }
+function tambahStok(id) { aksi(async () => { await api('PATCH', `/katalog/produk/${id}/stok`, { tambah: 10 }); muatProduk(); }); }
+$('#btnTambahKat').onclick = () => aksi(async () => { await api('POST', '/katalog/kategori', { nama: $('#kNama').value }); $('#kNama').value = ''; muatProduk(); });
+function hapusKat(id) { aksi(async () => { await api('DELETE', `/katalog/kategori/${id}`); muatProduk(); }); }
+
+// ---------- Pembayaran ----------
+async function muatBayar() {
+  const list = await api('GET', '/pembayaran/admin/daftar');
+  $('#tabelBayar').innerHTML = list.length ? `<table><tr><th>ID</th><th>Order</th><th class="num">Jumlah</th><th>Metode</th><th>Status</th><th>Sinkron ke order</th><th>Waktu</th></tr>
+    ${list.map((b) => `<tr><td>${b.id}</td><td>${esc(b.order_kode)}</td><td class="num">${rupiah(b.jumlah)}</td><td>${esc(b.metode || '-')}</td><td>${badge(b.status)}</td>
+      <td>${b.tersinkron ? 'ya' : `<span class="s-GAGAL">belum (${b.sync_attempt}x)</span>`}<div class="muted">${esc(b.sync_error)}</div></td><td>${tgl(b.updated_at)}</td></tr>`).join('')}</table>`
+    : '<div class="empty">Belum ada pembayaran</div>';
+}
+$('#btnSinkron').onclick = () => aksi(async () => { const r = await api('POST', '/pembayaran/admin/sinkron'); toast(`Diproses ${r.diproses}, sisa belum tersinkron ${r.belum_tersinkron}`); muatBayar(); });
+
+// ---------- Pelanggan ----------
+async function muatPelanggan() {
+  const list = await api('GET', '/pelanggan/admin/daftar');
+  $('#tabelPelanggan').innerHTML = `<table><tr><th>ID</th><th>Nama</th><th>Email</th><th>Telepon</th><th>Role</th><th>Terdaftar</th></tr>
+    ${list.map((p) => `<tr><td>${p.id}</td><td>${esc(p.nama)}</td><td>${esc(p.email)}</td><td>${esc(p.telepon)}</td><td>${esc(p.role)}</td><td>${tgl(p.created_at)}</td></tr>`).join('')}</table>`;
+}
+
+mulai();
+cekLayanan($('#svc')); setInterval(() => cekLayanan($('#svc')), 10000);
+</script>
+</body>
+</html>
