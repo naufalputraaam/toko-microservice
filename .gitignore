@@ -1,0 +1,7 @@
+# Biner hasil build & file lokal
+*.exe
+/bin/
+.env
+.DS_Store
+.vscode/
+.idea/
