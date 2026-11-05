@@ -1,0 +1,107 @@
+# Jalankan semua:      docker compose up -d --build
+# Isi data contoh:     docker compose run --rm tests seed
+# Tes end-to-end:      docker compose run --rm tests e2e
+# Buka di browser:     http://localhost:8080  (toko)   http://localhost:8080/admin.html (admin)
+#
+# Prinsip "database per service": setiap service punya container PostgreSQL sendiri,
+# dan service lain TIDAK boleh mengakses database itu langsung, hanya lewat API.
+
+x-db: &db
+  image: postgres:16-alpine
+  environment: &dbenv
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+  restart: unless-stopped
+
+services:
+  # ---------------- Database ----------------
+  katalog-db:
+    <<: *db
+    environment: { <<: *dbenv, POSTGRES_DB: katalog_db }
+    volumes: [katalog-data:/var/lib/postgresql/data]
+
+  pelanggan-db:
+    <<: *db
+    environment: { <<: *dbenv, POSTGRES_DB: pelanggan_db }
+    volumes: [pelanggan-data:/var/lib/postgresql/data]
+
+  order-db:
+    <<: *db
+    environment: { <<: *dbenv, POSTGRES_DB: order_db }
+    volumes: [order-data:/var/lib/postgresql/data]
+
+  pembayaran-db:
+    <<: *db
+    environment: { <<: *dbenv, POSTGRES_DB: pembayaran_db }
+    volumes: [pembayaran-data:/var/lib/postgresql/data]
+
+  # ---------------- Service ----------------
+  pelanggan-service:            # Peserta 2
+    build: ./pelanggan-service
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@pelanggan-db:5432/pelanggan_db?sslmode=disable
+      JWT_SECRET: ganti-dengan-rahasia-kelompok
+      ADMIN_EMAIL: admin@toko.local
+      ADMIN_PASSWORD: admin123
+    ports: ["8082:8080"]        # untuk uji mandiri: http://localhost:8082
+    depends_on: { pelanggan-db: { condition: service_healthy } }
+    restart: unless-stopped
+
+  katalog-service:              # Peserta 1
+    build: ./katalog-service
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@katalog-db:5432/katalog_db?sslmode=disable
+      PELANGGAN_URL: http://pelanggan-service:8080
+    ports: ["8081:8080"]
+    depends_on: { katalog-db: { condition: service_healthy } }
+    restart: unless-stopped
+
+  order-service:                # Peserta 3
+    build: ./order-service
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@order-db:5432/order_db?sslmode=disable
+      PELANGGAN_URL: http://pelanggan-service:8080
+      KATALOG_URL: http://katalog-service:8080
+      PEMBAYARAN_URL: http://pembayaran-service:8080
+    ports: ["8083:8080"]
+    depends_on: { order-db: { condition: service_healthy } }
+    restart: unless-stopped
+
+  pembayaran-service:           # Peserta 4
+    build: ./pembayaran-service
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@pembayaran-db:5432/pembayaran_db?sslmode=disable
+      PELANGGAN_URL: http://pelanggan-service:8080
+      ORDER_URL: http://order-service:8080
+      SYNC_INTERVAL: 10s
+    ports: ["8084:8080"]
+    depends_on: { pembayaran-db: { condition: service_healthy } }
+    restart: unless-stopped
+
+  # ---------------- API Gateway + Dashboard ----------------
+  gateway:                      # Peserta 5
+    build: ./gateway
+    ports: ["8080:80"]
+    depends_on: [katalog-service, pelanggan-service, order-service, pembayaran-service]
+    restart: unless-stopped
+
+  # ---------------- Seed & tes (hanya jalan jika dipanggil) ----------------
+  tests:
+    build: ./tests
+    profiles: ["tools"]
+    environment:
+      BASE_URL: http://gateway
+      ADMIN_EMAIL: admin@toko.local
+      ADMIN_PASSWORD: admin123
+    depends_on: [gateway]
+
+volumes:
+  katalog-data:
+  pelanggan-data:
+  order-data:
+  pembayaran-data:
